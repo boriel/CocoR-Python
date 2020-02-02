@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-from typing import Any, List
+from typing import Any
 
 
 class ArrayList:
