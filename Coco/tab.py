@@ -1040,6 +1040,40 @@ class Tab:
         for sym in self.nonterminals:
             if sym.n not in visited:
                 ok = False
-                self.errors.warning(" {} cannot be reached".format(sym.name))
+                self.errors.warning("   {} cannot be reached".format(sym.name))
 
         return ok
+
+    def is_term(self, p: Node, mark: Set[int]) -> bool:
+        while p is not None:
+            if p.typ == Node.nt and p.sym.n not in mark:
+                return False
+            if p.typ == Node.alt and not self.is_term(p.sub, mark) and \
+                    (p.down is None or not self.is_term(p.down, mark)):
+                return False
+            if p.up:
+                break
+            p = p.next
+
+    def all_nt_to_term(self):
+        ok = True
+        mark: Set[int] = set()
+
+        changed = True
+        while changed:
+            changed = False
+            for sym in self.nonterminals:
+                if sym.n not in mark and self.is_term(sym.graph, mark):
+                    mark.add(sym.n)
+                    changed = True
+
+        for sym in self.nonterminals:
+            if sym.n not in mark:
+                ok = False
+                self.errors.sem_err("  {} cannot be derived to terminals".format(sym.name))
+
+        return ok
+
+    # ---------------------------------------------------------------------
+    #   Cross reference list
+    # ---------------------------------------------------------------------
