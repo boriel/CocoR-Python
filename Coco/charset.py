@@ -27,7 +27,7 @@ class Range:
         return self.from_, self.to == other.from_, other.to
 
 
-class Charset:
+class CharSet:
     def __init__(self):
         self.ranges: List[Range] = []
 
@@ -62,14 +62,14 @@ class Charset:
         self.ranges.insert(jj, Range(i, i))
 
     def clone(self):
-        result = Charset()
+        result = CharSet()
         for range_ in self.ranges:
             result.ranges.append(Range(range_.from_, range_.to))
 
         return result
 
     def equals(self, other) -> bool:
-        assert isinstance(other, Charset)
+        assert isinstance(other, CharSet)
         return self.ranges == other.ranges
 
     def elements(self) -> int:
@@ -79,14 +79,14 @@ class Charset:
         return self.ranges[0].from_ if self.ranges else -1
 
     def or_(self, other):
-        assert isinstance(other, Charset)
+        assert isinstance(other, CharSet)
         for range_ in other.ranges:
             for i in range_:
                 self.set(i)
 
     def and_(self, other):
-        assert isinstance(other, Charset)
-        x = Charset()
+        assert isinstance(other, CharSet)
+        x = CharSet()
 
         for range_ in self.ranges:
             for i in range_:
@@ -96,8 +96,8 @@ class Charset:
         self.ranges = x.ranges
 
     def subtract(self, other):
-        assert isinstance(other, Charset)
-        x = Charset()
+        assert isinstance(other, CharSet)
+        x = CharSet()
 
         for range_ in self.ranges:
             for i in range_:
@@ -107,14 +107,14 @@ class Charset:
         self.ranges = x.ranges
 
     def includes(self, other) -> bool:
-        assert isinstance(other, Charset)
+        assert isinstance(other, CharSet)
         return all(
             all(self.get(i) for i in range_)
             for range_ in other.ranges
         )
 
     def intersects(self, other) -> bool:
-        assert isinstance(other, Charset)
+        assert isinstance(other, CharSet)
         return any(
             any(self.get(i) for i in range_)
             for range_ in other.ranges
