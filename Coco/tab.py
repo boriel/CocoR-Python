@@ -707,6 +707,7 @@ class Tab:
     def comp_deletable_symbols(self):
         changed = True
         while changed:
+            changed = False
             for sym in self.nonterminals:
                 if not sym.deletable and sym.graph is not None and self.del_graph(sym.graph):
                     sym.deletable = True
