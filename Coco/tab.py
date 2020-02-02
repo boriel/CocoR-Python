@@ -112,11 +112,20 @@ class Graph:
             self.l = self.r = args[0]
 
 
+class CNode:
+    """ Node of list for finding circular productions
+    """
+
+    def __init__(self, left: Symbol, right: Symbol):
+        self.left = left
+        self.right = right
+
+
 class Tab:
     semFeclPos: Position
     ignored: CharSet
     ddt: List[bool] = [False] * 10
-    grafSy: Symbol
+    gramSy: Symbol
     eofSy: Symbol
     noSym: Symbol
     allSyncSets: Set[int]
@@ -587,7 +596,7 @@ class Tab:
             sym.follow = set()
             sym.nts = set()
 
-        self.grafSy.follow.add(self.eofSy.n)
+        self.gramSy.follow.add(self.eofSy.n)
         self.visited = set()
 
         for sym in self.nonterminals:
@@ -832,3 +841,205 @@ class Tab:
             }.get(c, c if ' ' <= c <= '\u007f' else self.char2hex(ord(c)))
 
         return buf
+
+    # ---------------------------------------------------------------------
+    #   Grammar checks
+    # ---------------------------------------------------------------------
+
+    def grammar_ok(self):
+        ok = self.nts_complete() and self.no_circular_productions() and self.all_nt_to_term()
+        if ok:
+            self.all_nt_reached()
+            self.check_resolvers()
+            self.check_LL1()
+
+        return ok
+
+    # --------------- check for circular productions ----------------------
+
+    def get_singles(self, p: Node, singles: List[Symbol]):
+        if p is None:
+            return
+
+        if p.typ == Node.nt:
+            if p.up or self.del_graph(p.next):
+                singles.append(p.sym)
+        elif p.typ in (Node.alt, Node.iter, Node.opt):
+            if p.up or self.del_graph(p.next):
+                self.get_singles(p.sub, singles)
+                if p.typ == Node.alt:
+                    self.get_singles(p.down, singles)
+
+        if not p.up and self.del_node(p):
+            self.get_singles(p.next, singles)
+
+    def no_circular_productions(self) -> bool:
+        list_: List[CNode] = []
+        for sym in self.nonterminals:
+            singles: List[Symbol] = []
+            self.get_singles(sym.graph, singles)
+            list_.extend([CNode(sym, s) for s in singles])
+
+        changed = True
+        while changed:
+            changed = False
+            for n in list_:
+                on_left_side = on_right_side = False
+                for m in list_:
+                    if n.left == m.right:
+                        on_right_side = True
+                    if n.right == m.left:
+                        on_left_side = True
+
+                if not on_left_side or not on_right_side:
+                    list_.remove(n)
+                    changed = True
+
+        ok = True
+        for n in list_:
+            ok = False
+            self.errors.sem_err(" {} --> {}".format(n.left.name, n.right.name))
+
+        return ok
+
+    # --------------- check for LL(1) errors ----------------------
+
+    def LL1_error(self, cond: int, sym: Optional[Symbol]):
+        s = "  LL1 warning in {}: ".format(self.curSy.name)
+        if sym is not None:
+            s += sym.name + " is "
+
+        s += [
+            "start of several alternatives",
+            "start & successor of deletable structure",
+            "an ANY node that matches no symbol",
+            "contents of [...] or {...} must not be deletable"
+        ][cond]
+        self.errors.warning(s)
+
+    def check_overlap(self, s1: Set[int], s2: Set[int], cond: int):
+        for sym in self.terminals:
+            if sym.n in s1 and sym.n in s2:
+                self.LL1_error(cond, sym)
+
+    def check_alts(self, p: Node):
+        while p is not None:
+            if p.typ == Node.alt:
+                q = p
+                s1: Set[int] = set()
+                while q is not None:
+                    s2 = self.expected0(q.sub, self.curSy)
+                    self.check_overlap(s1, s2, 1)
+                    s1.update(s2)
+                    self.check_alts(q.sub)
+                    q = q.down
+            elif p.typ == Node.opt or p.typ == Node.iter:
+                if self.del_sub_graph(p.sub):
+                    self.LL1_error(4, None)
+                else:
+                    s1 = self.expected0(p.sub, self.curSy)
+                    s2 = self.expected(p.next, self.curSy)
+                    self.check_overlap(s1, s2, 2)
+                self.check_alts(p.sub)
+            elif p.typ == Node.any:
+                if not p.set_:
+                    self.LL1_error(3, None)
+
+            if p.up:
+                break
+
+            p = p.next
+
+    def check_LL1(self):
+        for curSy in self.nonterminals:
+            self.check_alts(curSy.graph)
+
+    # ------------- check if resolvers are legal  --------------------
+
+    def res_err(self, p: Node, msg: str):
+        self.errors.warning(p.line, p.pos.col, msg)
+
+    def check_res(self, p: Node, rslv_allowed: bool):
+        while p is not None:
+            if p.typ == Node.alt:
+                expected: Set[int] = set()
+                q: Node = p
+                while q is not None:
+                    expected.update(self.expected0(q.sub, self.curSy))
+                    q = q.down
+
+                so_far: Set[int] = set()
+                q = p
+                while q is not None:
+                    if q.sub.typ == Node.rslv:
+                        fs: Set[int] = self.expected(q.sub.next, self.curSy)
+                        if fs.intersection(so_far):
+                            self.res_err(q.sub, "Warning: Resolver will never be evaluated. " +
+                                         "Place it at previous conflicting alternative.")
+                        if not fs.intersection(expected):
+                            self.res_err(q.sub, "Warning: Misplaced resolver: no LL(1) conflict.")
+                    else:
+                        so_far.update(self.expected(q.sub, self.curSy))
+
+                    self.check_res(q.sub, True)
+                    q = q.down
+
+            elif p.typ in (Node.iter, Node.opt):
+                if p.sub.typ == Node.rslv:
+                    fs: Set[int] = self.first(p.sub.next)
+                    fs_next: Set[int] = self.expected(p.next, self.curSy)
+                    if not fs.intersection(fs_next):
+                        self.res_err(p.sub, "Warning: Misplaced resolver: no LL(1) conflict.")
+
+                self.check_res(p.sub, True)
+
+            elif p.typ == Node.rslv:
+                if not rslv_allowed:
+                    self.res_err(p, "Warning: Misplaced resolver: no alternative.")
+
+            if p.up:
+                break
+            p = p.next
+            rslv_allowed = False
+
+    def check_resolvers(self):
+        for curSy in self.nonterminals:
+            self.check_res(curSy.graph, False)
+
+    # ------------- check if every nts has a production --------------------
+
+    def nts_complete(self) -> bool:
+        complete = True
+        for sym in self.nonterminals:
+            if sym.graph is None:
+                complete = False
+                self.errors.sem_err("  No production for {}".format(sym.name))
+
+        return complete
+
+    # -------------- check if every nts can be reached  -----------------
+
+    def mark_reached_nts(self, p: Node):
+        while p is not None:
+            if p.typ == Node.nt and p.sym.n not in self.visited:
+                self.visited.add(p.sym.n)
+                self.mark_reached_nts(p.sym.graph)
+            elif p.typ in (Node.alt, Node.iter, Node.opt):
+                self.mark_reached_nts(p.sub)
+                if p.typ == Node.alt:
+                    self.mark_reached_nts(p.down)
+
+            if p.up:
+                break
+            p = p.next
+
+    def all_nt_reached(self) -> bool:
+        ok = True
+        visited: Set[int] = {self.gramSy.n}
+        self.mark_reached_nts(self.gramSy.graph)
+        for sym in self.nonterminals:
+            if sym.n not in visited:
+                ok = False
+                self.errors.warning(" {} cannot be reached".format(sym.name))
+
+        return ok
