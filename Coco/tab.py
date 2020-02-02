@@ -481,3 +481,25 @@ class Tab:
     def CharClass_set(self, i: int) -> CharSet:
         return self.classes[i].set_
 
+    # -------------------- character class printing -----------------------
+
+    @staticmethod
+    def ch(ch_: int) -> str:
+        ch_ = chr(ch_)
+        if ch_ < ' ' or ch_ > chr(127) or ch_ == '\'' or ch_ == '\\':
+            return ch_
+        return "'{}'".format(ch_)
+
+    def write_char_set(self, s: CharSet):
+        for r in s.ranges:
+            if r.from_ < r.to:
+                self.trace.write("{}..{} ".format(self.ch(r.from_), self.ch(r.to)))
+            else:
+                self.trace.write(self.ch(r.from_) + " ")
+
+    def write_CharClasses(self):
+        for c in self.classes:
+            self.trace.write(c.name + ": ", -10)
+            self.write_char_set(c.set_)
+            self.trace.write_line()
+        self.trace.write_line()
