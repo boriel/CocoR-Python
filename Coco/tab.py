@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
 
-from typing import NamedTuple, Optional, List, Union
+from typing import NamedTuple, Optional, List, Union, Set
 
 from .charset import CharSet
 from .parser import Parser
 from .errors import Errors
 from .trace import Trace
+from . import constants
 
 
 class Position(NamedTuple):
@@ -32,9 +33,9 @@ class Symbol:
     deletable: bool
     firstReady: bool
 
-    first: set
-    follow: set
-    nts: set
+    first: Set[int]
+    follow: Set[int]
+    nts: Set[int]
 
     attrPos: Position
     semPos: Position
@@ -118,7 +119,7 @@ class Tab:
     grafSy: Symbol
     eofSy: Symbol
     noSym: Symbol
-    allSyncSets: set
+    allSyncSets: Set[int]
     literals: dict
 
     srcName: str
@@ -128,7 +129,7 @@ class Tab:
     outDir: str
     checkEOF: bool = False
 
-    visited: set
+    visited: Set[int]
     curSy: Symbol
     parser: Parser
     trace: Trace
@@ -503,3 +504,330 @@ class Tab:
             self.write_char_set(c.set_)
             self.trace.write_line()
         self.trace.write_line()
+
+    # ---------------------------------------------------------------------
+    #   Symbol set computations
+    # ---------------------------------------------------------------------
+
+    # Computes the first set for the graph rooted at p
+
+    def first0(self, p: Node, mark: Set[int]) -> Set[int]:
+        fs: Set[int] = set()
+        while p is not None and p.n not in mark:
+            mark.add(p.n)
+            if p.typ == Node.nt:
+                if p.sym.firstReady:
+                    fs.update(p.sym.first)
+                else:
+                    fs.update(self.first0(p.sym.graph, mark))
+            elif p.typ in (Node.t, Node.wt):
+                fs.add(p.sym.n)
+            elif p.typ == Node.any:
+                fs.update(p.set_)
+            elif p.typ == Node.alt:
+                fs.update(self.first0(p.sub, mark))
+                fs.update(self.first0(p.down, mark))
+            elif p.typ in (Node.iter, Node.opt):
+                fs.update(self.first0(p.sub, mark))
+
+            if not self.del_node(p):
+                break
+            p = p.next
+
+        return fs
+
+    def first(self, p: Node) -> Set[int]:
+        fs = self.first0(p, set())
+        if self.ddt[3]:
+            self.trace.write_line()
+            if p is not None:
+                self.trace.write_line("First: node = {}".format(p.n))
+            else:
+                self.trace.write_line("First: node = null")
+                self.print_set(fs, 0)
+
+        return fs
+
+    def comp_first_sets(self):
+        for sym in self.nonterminals:
+            sym.first = set()
+            sym.firstReady = False
+
+        for sym in self.nonterminals:
+            sym.first = self.first(sym.graph)
+            sym.firstReady = True
+
+    def comp_follow(self, p: Node):
+        while p is not None and p.n in self.visited:
+            self.visited.add(p.n)
+            if p.typ == Node.nt:
+                s = self.first(p.next)
+                p.sym.follow.update(s)
+                if self.del_graph(p.next):
+                    p.sym.nts.add(self.curSy.n)
+            elif p.typ == Node.opt or p.typ == Node.iter:
+                self.comp_follow(p.sub)
+            elif p.typ == Node.alt:
+                self.comp_follow(p.sub)
+                self.comp_follow(p.down)
+            p = p.next
+
+    def complete(self, sym: Symbol):
+        if sym.n not in self.visited:
+            self.visited.add(sym.n)
+            for s in self.nonterminals:
+                if s.n in sym.nts:
+                    self.complete(s)
+                    sym.follow.update(s.follow)
+                    if sym == self.curSy:
+                        sym.nts.remove(s.n)
+
+    def comp_follow_sets(self):
+        for sym in self.nonterminals:
+            sym.follow = set()
+            sym.nts = set()
+
+        self.grafSy.follow.add(self.eofSy.n)
+        self.visited = set()
+
+        for sym in self.nonterminals:
+            self.curSy = sym
+            self.comp_follow(self.curSy.graph)
+
+        for sym in self.nonterminals:
+            self.curSy = sym
+            self.visited = set()
+            self.complete(self.curSy)
+
+    def leading_any(self, p: Node) -> Optional[Node]:
+        if p is None:
+            return None
+
+        a: Optional[Node] = None
+        if p.typ == Node.any:
+            a = p
+        elif p.typ == Node.alt:
+            a = self.leading_any(p.sub)
+            if a is None:
+                a = self.leading_any(p.down)
+        elif p.typ == Node.opt or p.typ == Node.iter:
+            a = self.leading_any(p.sub)
+        if a is None and self.del_node(p) and not p.up:
+            a = self.leading_any(p.next)
+
+        return a
+
+    def find_as(self, p: Node):
+        """ Find ANY sets
+        """
+        while p is not None:
+            if p.typ == Node.opt or p.typ == Node.iter:
+                self.find_as(p.sub)
+                a = self.leading_any(p.sub)
+                if a is not None:
+                    a.set_ -= self.first(p.next)
+
+            elif p.typ == Node.alt:
+                s1 = set()
+                q = p
+                while q is not None:
+                    self.find_as(q.sub)
+                    a = self.leading_any(q.sub)
+
+                    if a is not None:
+                        h = self.first(q.down)
+                        h.update(s1)
+                        a.set_ -= h
+                    else:
+                        s1.update(self.first(q.sub))
+
+                    q = q.down
+
+            # Remove alternative terminals before ANY, in the following
+            # examples a and b must be removed from the ANY set:
+            # [a] ANY, or {a|b} ANY, or [a][b] ANY, or (a|) ANY, or
+            # A = [a]. A ANY
+            if self.del_node(p):
+                a = self.leading_any(p.next)
+                if a is not None:
+                    q = p.sym.graph if p.typ == Node.nt else p.sub
+                    a.set_ -= self.first(q)
+
+            if p.up:
+                break
+
+            p = p.next
+
+    def comp_any_sets(self):
+        for sym in self.nonterminals:
+            self.find_as(sym.graph)
+
+    def expected(self, p: Node, curSy: Symbol) -> Set[int]:
+        s: Set[int] = self.first(p)
+
+        if self.del_graph(p):
+            s.update(curSy.follow)
+        return s
+
+    def expected0(self, p: Node, curSy: Symbol) -> Set[int]:
+        if p.typ == Node.rslv:
+            return set()
+        return self.expected(p, curSy)
+
+    def comp_sync(self, p: Node):
+        while p is not None and p.n not in self.visited:
+            self.visited.add(p.n)
+
+            if p.typ == Node.sync:
+                s = self.expected(p.next, self.curSy)
+                s.add(self.eofSy.n)
+                self.allSyncSets.update(s)
+                p.set_ = s
+            elif p.typ == Node.alt:
+                self.comp_sync(p.sub)
+                self.comp_sync(p.down)
+            elif p.typ == Node.opt or p.typ == Node.iter:
+                self.comp_sync(p.sub)
+
+            p = p.next
+
+    def comp_sync_sets(self):
+        self.allSyncSets = {self.eofSy.n}
+        self.visited = set()
+
+        for curSy in self.nonterminals:
+            self.comp_sync(curSy.graph)
+
+    def setup_anys(self):
+        for p in self.nodes:
+            if p.typ == Node.any:
+                p.set = {0, len(self.terminals)}
+                p.set.discard(self.eofSy.n)
+
+    def comp_deletable_symbols(self):
+        changed = True
+        while changed:
+            for sym in self.nonterminals:
+                if not sym.deletable and sym.graph is not None and self.del_graph(sym.graph):
+                    sym.deletable = True
+                    changed = True
+
+        for sym in self.nonterminals:
+            if sym.deletable:
+                self.errors.warning(" {} deletable".format(sym.name))
+
+    def renumber_pragmas(self):
+        n = len(self.terminals)
+        for sym in self.pragmas:
+            sym.n = n
+            n += 1
+
+    def comp_symbol_sets(self):
+        self.comp_deletable_symbols()
+        self.comp_first_sets()
+        self.comp_any_sets()
+        self.comp_follow_sets()
+        self.comp_sync_sets()
+
+        if self.ddt[1]:
+            self.trace.write_line()
+            self.trace.write_line("First & follow symbols:")
+            self.trace.write_line("----------------------")
+            self.trace.write_line()
+
+            for sym in self.nonterminals:
+                self.trace.write_line(sym.name)
+                self.trace.write("first:   ")
+                self.print_set(sym.first, 10)
+                self.trace.write("follow:  ")
+                self.print_set(sym.follow, 10)
+                self.trace.write_line()
+
+        if self.ddt[4]:
+            self.trace.write_line()
+            self.trace.write_line("ANY and SYNC sets:")
+            self.trace.write_line("-----------------")
+
+            for p in self.nodes:
+                if p.typ == Node.any or p.typ == Node.sync:
+                    self.trace.write("Line: ")
+                    self.trace.write_line(str(p.line), 4)
+                    self.trace.write("Node: ")
+                    self.trace.write(str(p.n), 4)
+                    self.trace.write(" ")
+                    self.trace.write(self.nTyp[p.typ], 4)
+                    self.trace.write(": ")
+                    self.print_set(p.set_, 11)
+
+    # ---------------------------------------------------------------------
+    #   String handling
+    # ---------------------------------------------------------------------
+
+    def hex2char(self, s: str) -> int:
+        val = 0
+        try:
+            val = int(s, 16)
+            if val > constants.COCO_WCHAR_MAX:
+                raise ValueError()
+        except ValueError:
+            self.parser.sem_err("bad escape sequence in string or character")
+
+        return val & constants.COCO_WCHAR_MAX
+
+    @staticmethod
+    def char2hex(ch: int) -> str:
+        return "\\u%04X" % ch
+
+    def unescape(self, s: str) -> str:
+        buf = ''
+        i = 0
+        while i < len(s):
+            c = s[i]
+            if c != '\\':
+                buf += c
+                continue
+            c = s[i + 1]
+            if c in 'ux':
+                if i + 6 < len(s):
+                    buf += self.hex2char(s[i + 2: i + 6])
+                    i += 6
+                    continue
+                else:
+                    self.parser.sem_err("bad escape sequence in string or character")
+                    break
+
+            cc = {
+                '\\': '\\',
+                '\'': '\'',
+                '\"': '\"',
+                'r': '\r',
+                'n': '\n',
+                't': '\t',
+                'v': '\u000b',
+                '0': '\0',
+                'b': '\b',
+                'f': '\f',
+                'a': '\u0007',
+            }.get(c)
+
+            if cc is None:
+                self.parser.sem_err("bad escape sequence in string or character")
+                break
+
+            buf += cc
+
+        return buf
+
+    def escape(self, s: str) -> str:
+        buf = ''
+        for c in s:
+            buf += {
+                '\\': '\\\\',
+                '\'': "\\'",
+                '\"': "\\\"",
+                '\t': "\\t",
+                '\r': "\\r",
+                '\n': "\\n"
+            }.get(c, c if ' ' <= c <= '\u007f' else self.char2hex(ord(c)))
+
+        return buf
