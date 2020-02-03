@@ -1118,3 +1118,13 @@ class Tab:
 
         self.trace.write_line()
         self.trace.write_line()
+
+    def set_option(self, s: str):
+        option = s.split("=", 2)
+        name, value = option
+
+        if name == "$package":
+            if not self.nsName:
+                self.nsName = value
+        elif name == "$checkEOF":
+            self.checkEOF = (value == "true")
