@@ -1119,6 +1119,25 @@ class Tab:
         self.trace.write_line()
         self.trace.write_line()
 
+    def set_DDT(self, s: str):
+        s = s.upper()
+        for ch in s:
+            if '0' <= 'ch' <= '9':
+                self.ddt[ord(ch) - ord('0')] = True
+            else:
+                ii = {
+                    'A': 0,  # trace automaton
+                    'F': 1,  # list first/follow sets
+                    'G': 2,  # print syntax graph
+                    'I': 3,  # trace computation of first sets
+                    'J': 4,  # print ANY and SYNC sets
+                    'P': 8,  # print statistics
+                    'S': 6,  # list symbol table
+                    'X': 7,  # list cross reference table
+                }.get(ch)
+                if ii is not None:
+                    self.ddt[ii] = True
+
     def set_option(self, s: str):
         option = s.split("=", 2)
         name, value = option
