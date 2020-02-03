@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 from typing import NamedTuple, Optional, List, Union, Set
+from collections import defaultdict
 
 from .charset import CharSet
 from .parser import Parser
@@ -47,6 +48,12 @@ class Symbol:
         self.typ = typ
         self.name = name
         self.line = line
+
+    def __hash__(self):
+        return self.n
+
+    def __eq__(self, other):
+        return self.n == other.n
 
 
 class Node:
@@ -1077,3 +1084,37 @@ class Tab:
     # ---------------------------------------------------------------------
     #   Cross reference list
     # ---------------------------------------------------------------------
+
+    def XRef(self):
+        xref = defaultdict(list)
+        for sym in self.nonterminals:
+            xref[sym].append(-sym.line)
+
+        for n in self.nodes:
+            if n.typ in (Node.t, Node.wt, Node.nt):
+                xref[n.sym].append(n.line)
+
+        # print cross reference list
+        self.trace.write_line()
+        self.trace.write_line("Cross reference list:")
+        self.trace.write_line("--------------------")
+        self.trace.write_line()
+
+        for sym in sorted(xref.keys(), key=lambda s: s.name):
+            self.trace.write("  ")
+            self.trace.write(self.name(sym.name), -12)
+            col = 14
+            for line in xref[sym]:
+                if col + 5 > 80:
+                    self.trace.write_line()
+                    for col in range(1, 15):
+                        self.trace.write(" ")
+                    col = 15
+
+                self.trace.write(str(line), 5)
+                col += 5
+
+            self.trace.write_line()
+
+        self.trace.write_line()
+        self.trace.write_line()
