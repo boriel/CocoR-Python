@@ -396,3 +396,284 @@ class Scanner:
             self.char_pos = char_pos0
         return False
 
+    def check_literal(self):
+        val = self.t.val
+        kind = self.literals.get(val)
+        if kind is not None:
+            self.t.kind = kind
+
+    def next_token(self) -> Token:
+        while self.ch in (ord(' '), 9, 10, 13):
+            self.next_ch()
+
+        if self.ch == ord('/') and (self.comment0() or self.comment1()):
+            return self.next_token()
+
+        rec_kind = self.noSym
+        rec_end = self.pos
+
+        self.t = Token()
+        self.t.pos = self.pos
+        self.t.col = self.col
+        self.t.line = self.line
+        self.t.charPos = self.char_pos
+
+        state: int = self.start.get(self.ch, 0)
+        self.tval = ''
+        self.add_ch()
+
+        while True:
+            ch: str = chr(self.ch)
+            if state == -1:
+                self.t.kind = self.eofSym
+                break
+
+            elif state == 0:
+                if rec_kind != self.noSym:
+                    self.set_scanner_behind_T()
+                self.t.kind = rec_kind
+                break
+
+            elif state == 1:
+                rec_end = self.pos
+                rec_kind = 1
+                if ch.isalnum() or ch == '_':
+                    self.add_ch()
+                    state = 1
+                else:
+                    self.t.kind = 1
+                    self.t.val = self.tval
+                    self.check_literal()
+                    return self.t
+
+            elif state == 2:
+                rec_end = self.pos
+                rec_kind = 2
+                if ch.isnumeric():
+                    self.add_ch()
+                    state = 2
+
+            elif state == 3:
+                self.t.kind = 3
+                break
+
+            elif state == 4:
+                self.t.kind = 4
+                break
+
+            elif state == 5:
+                if self.ch <= 9 or self.ch in (11, 12) or 14 <= self.ch <= ord('&') or '(' <= ch <= '[' or \
+                        ch >= ']' and self.ch <= 65535:
+                    self.add_ch()
+                    state = 6
+                elif self.ch == 92:
+                    self.add_ch()
+                    state = 7
+                else:
+                    state = 0
+
+            elif state == 6:
+                if self.ch == 39:
+                    self.add_ch()
+                    state = 9
+                else:
+                    state = 0
+
+            elif state == 7:
+                if ' ' <= ch <= '~':
+                    self.add_ch()
+                    state = 8
+                else:
+                    state = 0
+
+            elif state == 8:
+                if '0' <= ch <= '9' or 'a' <= ch <= 'f':
+                    self.add_ch()
+                elif state == 39:
+                    self.add_ch()
+                    state = 9
+                else:
+                    state = 0
+
+            elif state == 9:
+                self.t.kind = 5
+                break
+
+            elif state == 10:
+                rec_end = self.pos
+                rec_kind = 45
+                if ch.isalnum() or ch == '_':
+                    self.add_ch()
+                    state = 10
+                else:
+                    self.t.kind = 45
+                    break
+
+            elif state == 11:
+                rec_end = self.pos
+                rec_kind = 46
+                if '-' <= ch <= '.' or '0' <= ch <= ':' or ch.isalpha() or ch == '_':
+                    self.add_ch()
+                else:
+                    self.t.kind = 46
+                    break
+
+            elif state == 12:
+                if self.ch <= 9 or 11 <= self.ch <= 12 or self.ch >= 14 and ch <= '!' or '#' <= ch <= '[' or \
+                        ch >= ']' and self.ch <= 65535:
+                    self.add_ch()
+                elif self.ch in (10, 13):
+                    self.add_ch()
+                    state = 4
+                elif ch == '"':
+                    self.add_ch()
+                    state = 3
+                elif self.ch == 92:
+                    self.add_ch()
+                    state = 14
+                else:
+                    state = 0
+
+            elif state == 13:
+                rec_end = self.pos
+                rec_kind = 45
+                if ch.isnumeric():
+                    self.add_ch()
+                    state = 10
+                elif ch == '_' or ch.isalpha():
+                    self.add_ch()
+                    state = 15
+                else:
+                    self.t.kind = 45
+                    break
+
+            elif state == 14:
+                if ' ' <= ch <= '~':
+                    self.add_ch()
+                    state = 12
+                else:
+                    state = 0
+
+            elif state == 15:
+                rec_end = self.pos
+                rec_kind = 45
+                if ch.isnumeric():
+                    self.add_ch()
+                    state = 10
+                elif ch == '_' or ch.isalpha():
+                    self.add_ch()
+                elif ch == '=':
+                    self.add_ch()
+                    state = 11
+                else:
+                    self.t.kind = 45
+                    break
+
+            elif state == 16:
+                self.t.kind = 17
+                break
+
+            elif state == 17:
+                self.t.kind = 20
+                break
+
+            elif state == 18:
+                self.t.kind = 21
+                break
+
+            elif state == 19:
+                self.t.kind = 22
+                break
+
+            elif state == 20:
+                self.t.kind = 25
+                break
+
+            elif state == 21:
+                self.t.kind = 27
+                break
+
+            elif state == 22:
+                self.t.kind = 28
+                break
+
+            elif state == 23:
+                self.t.kind = 29
+                break
+
+            elif state == 24:
+                self.t.kind = 30
+                break
+
+            elif state == 25:
+                self.t.kind = 31
+                break
+
+            elif state == 26:
+                self.t.kind = 32
+                break
+
+            elif state == 27:
+                self.t.kind = 33
+                break
+
+            elif state == 28:
+                self.t.kind = 36
+                break
+
+            elif state == 29:
+                self.t.kind = 37
+                break
+
+            elif state == 30:
+                self.t.kind = 38
+                break
+
+            elif state == 31:
+                self.t.kind = 42
+                break
+
+            elif state == 32:
+                self.t.kind = 43
+                break
+
+            elif state == 33:
+                rec_end = self.pos
+                rec_kind = 18
+                if ch == '.':
+                    self.add_ch()
+                    state = 19
+                elif ch == '>':
+                    self.add_ch()
+                    state = 24
+                elif ch == ')':
+                    self.add_ch()
+                    state = 32
+                else:
+                    self.t.kind = 18
+                    break
+
+            elif state == 34:
+                rec_end = self.pos
+                rec_kind = 24
+                if ch == '.':
+                    self.add_ch()
+                    state = 23
+                else:
+                    self.t.kind = 24
+                    break
+
+            elif state == 35:
+                rec_end = self.pos
+                rec_kind = 35
+                if ch == '.':
+                    self.add_ch()
+                    state = 31
+                else:
+                    self.t.kind = 35
+                    break
+
+        self.t.val = self.tval
+        return self.t
+
+
