@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-from typing import BinaryIO, Union, Optional
+from typing import BinaryIO, Union, Optional, Dict, TextIO
 import os
 
 from .constants import COCO_WCHAR_MAX
@@ -200,7 +200,199 @@ class UTF8Buffer(Buffer):
 
 
 class Scanner:
-    EOL: str = '\n'
+    EOL: int = ord('\n')
     eofSym: int = 0
     maxT: int = 44
     noSym: int = 44
+
+    buffer: Buffer    # scanner buffer
+    t: Token          # current token
+    ch: int           # current input character
+    pos: int          # byte position of current character
+    char_pos: int     # position by unicode characters starting with 0
+    col: int          # column number of current character
+    line: int         # line number of current character
+    old_eols: int     # EOLs that appeared in a comment;
+
+    start: Dict[int, int]  # maps initial token character to start state
+    literals: dict         # maps literal strings to literal kinds
+
+    tokens: Token     # list of tokens already peeked (first token is a dummy)
+    pt: Token         # current peek token
+
+    tval: str         # token text used in NextToken(), dynamically enlarged
+
+    def init(self):
+        self.start = dict()
+        self.literals = dict()
+
+        for i in range(65, 91):
+            self.start[i] = 1
+
+        self.start[95] = 1
+
+        for i in range(97, 123):
+            self.start[i] = 1
+
+        for i in range(48, 58):
+            self.start[i] = 2
+
+        self.start[34] = 12
+        self.start[39] = 5
+        self.start[36] = 13
+        self.start[61] = 16
+        self.start[46] = 33
+        self.start[43] = 17
+        self.start[45] = 18
+        self.start[60] = 34
+        self.start[94] = 20
+        self.start[62] = 21
+        self.start[44] = 22
+        self.start[91] = 25
+        self.start[93] = 26
+        self.start[124] = 27
+        self.start[40] = 35
+        self.start[41] = 28
+        self.start[123] = 29
+        self.start[125] = 30
+        self.start[Buffer.EOF] = -1
+        
+        self.literals["COMPILER"] = 6
+        self.literals["IGNORECASE"] = 7
+        self.literals["CHARACTERS"] = 8
+        self.literals["TOKENS"] = 9
+        self.literals["PRAGMAS"] = 10
+        self.literals["COMMENTS"] = 11
+        self.literals["FROM"] = 12
+        self.literals["TO"] = 13
+        self.literals["NESTED"] = 14
+        self.literals["IGNORE"] = 15
+        self.literals["PRODUCTIONS"] = 16
+        self.literals["END"] = 19
+        self.literals["ANY"] = 23
+        self.literals["out"] = 26
+        self.literals["WEAK"] = 34
+        self.literals["SYNC"] = 39
+        self.literals["IF"] = 40
+        self.literals["CONTEXT"] = 41
+
+        self.pos = self.char_pos = -1
+        self.col = self.old_eols = 0
+        self.line = 1
+
+        self.next_ch()
+
+        if self.ch == 0xEF:  # check optional byte order mark for UTF-8
+            self.next_ch()
+            ch1 = self.ch
+            self.next_ch()
+            ch2 = self.ch
+
+            if ch1 != 0xBB or ch2 != 0xBF:
+                raise FatalError("Illegal byte order mark at start of file")
+
+            self.buffer = UTF8Buffer(self.buffer)
+            self.col = 0
+            self.char_pos = -1
+            self.next_ch()
+
+        self.pt = self.tokens = Token()
+
+    def __init__(self, s: Union[str, BinaryIO]):
+        self.buffer = Buffer(s)
+        self.init()
+
+    def next_ch(self):
+        if self.old_eols > 0:
+            self.ch = self.EOL
+            self.old_eols -= 1
+            return
+
+        self.pos = self.buffer.get_pos()
+        # buffer reads unicode chars, if UTF8 has been detected
+        self.ch = self.buffer.read()
+        self.col += 1
+        self.char_pos += 1
+        # replace isolated '\r' by '\n' in order to make
+        # eol handling uniform across Windows, Unix and Mac
+        if self.ch == ord('\r') and self.buffer.peek() != ord('\n'):
+            self.ch = self.EOL
+
+        if self.ch == self.EOL:
+            self.line += 1
+            self.col = 0
+
+    def add_ch(self):
+        if self.ch != Buffer.EOF:
+            self.tval += chr(self.ch)
+            self.next_ch()
+
+    def comment0(self) -> bool:
+        level = 1
+        pos0 = self.pos
+        line0 = self.line
+        col0 = self.col
+        char_pos0 = self.char_pos
+
+        self.next_ch()
+        if self.ch == ord('/'):
+            self.next_ch()
+            while True:
+                if self.ch == ord('\n'):
+                    level -= 1
+                    if level == 0:
+                        self.old_eols = self.line - line0
+                        self.next_ch()
+                        return True
+                    self.next_ch()
+
+                elif self.ch == Buffer.EOF:
+                    return False
+
+                else:
+                    self.next_ch()
+        else:
+            self.buffer.set_pos(pos0)
+            self.next_ch()
+            self.line = line0
+            self.col = col0
+            self.char_pos = char_pos0
+        return False
+
+    def comment1(self) -> bool:
+        level = 1
+        pos0 = self.pos
+        line0 = self.line
+        col0 = self.col
+        char_pos0 = self.char_pos
+
+        self.next_ch()
+        if self.ch == ord('*'):
+            self.next_ch()
+            while True:
+                if self.ch == ord('*'):
+                    self.next_ch()
+                    if self.ch == ord('/'):
+                        level -= 1
+                        if level == 0:
+                            self.old_eols = self.line - line0
+                            self.next_ch()
+                            return True
+                        self.next_ch()
+                elif self.ch == ord('/'):
+                    self.next_ch()
+                    if self.ch == ord('*'):
+                        level += 1
+                        self.next_ch()
+                elif self.ch == Buffer.EOF:
+                    return False
+                else:
+                    self.next_ch()
+        else:
+            self.buffer.set_pos(pos0)
+            self.next_ch()
+            self.line = line0
+            self.col = col0
+            self.char_pos = char_pos0
+        return False
+
