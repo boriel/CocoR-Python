@@ -676,4 +676,39 @@ class Scanner:
         self.t.val = self.tval
         return self.t
 
+    def set_scanner_behind_T(self):
+        self.buffer.set_pos(self.t.pos)
+        self.next_ch()
+        self.line = self.t.line
+        self.col = self.t.col
+        self.char_pos = self.t.charPos
 
+        for _ in self.tval:
+            self.next_ch()
+
+    def scan(self) -> Token:
+        """ Get the next token (possibly a token already seen during peeking)
+        """
+        if self.tokens is None:
+            return self.next_token()
+
+        self.pt = self.tokens = self.tokens.next
+        return self.tokens
+
+    def peek(self) -> Token:
+        """ Get the next token, ignore pragmas
+        """
+        while True:
+            if self.pt.next is None:
+                self.pt.next = self.next_token()
+
+            self.pt = self.pt.next
+            if self.pt.kind > self.maxT:
+                continue  # skip pragmas
+
+        return self.pt
+
+    def reset_peek(self):
+        """ Make sure that peeking starts at current scan position
+        """
+        self.pt = self.tokens
