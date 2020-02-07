@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 
-from typing import List, Optional
+from typing import List
 
-from .tab import Node, Symbol, Tab, CharClass
+from .tab import Node, Symbol, Tab
 from .charset import CharSet
 
 
@@ -47,7 +47,7 @@ class Action:
 
     def symbols(self, tab: Tab) -> CharSet:
         if self.typ == Node.clas:
-            s = tab.char_class_set(self.sym).clone()
+            s = tab.CharClass_set(self.sym).clone()
         else:
             s = CharSet()
             s.set(self.sym)
@@ -58,9 +58,9 @@ class Action:
             self.typ = Node.chr
             self.sym = s.first()
         else:
-            c = tab.find_char_class(s)
+            c = tab.find_CharClass(s)
             if c is None:
-                c = tab.new_char_class('#', s)
+                c = tab.new_CharClass('#', s)
                 self.typ = Node.clas
                 self.sym = c.n
 
