@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-from typing import List, BinaryIO, TextIO, Optional, Set
+from typing import List, BinaryIO, TextIO, Optional, Set, Any, Generator
 
 from .tab import Node, Symbol, Tab
 from .charset import CharSet
@@ -233,28 +233,23 @@ class DFA:
 
             s1 = s1.next
 
-        state = self._first_state
-        while state is not None:
+        for state in self.states():
             if state.nr in used:
                 for a in state.actions:
                     if a.target.state.nr not in used:
                         a.target.state = new_state[a.target.state.nr]
-            state = state.next
 
         # delete unused states
         self._last_state = self._first_state
         self.last_state_nr = 0  # firstState has number 0
 
-        state = self._first_state.next
-        while state is not None:
+        for state in self.states():
             if state.nr in used:
                 self.last_state_nr += 1
                 state.nr = self.last_state_nr
                 self._last_state = state
             else:
                 self._last_state.next = state.next
-
-            state = state.next
 
     def the_state(self, p: Node) -> State:
         if p is None:
@@ -340,4 +335,205 @@ class DFA:
             self.find_trans(p.sub, False, marked)
             self.find_trans(p.down, False, marked)
 
+    def convert_to_states(self, p: Node, sym: Symbol):
+        self.curSy = sym
+        if self.tab.del_graph(p):
+            self.parser.sem_err("token might be empty")
+            return
 
+        self.number_nodes(p, self._first_state, True)
+        self.find_trans(p, True, set())
+        if p.typ == Node.iter:
+            self.step(self._first_state, p, set())
+
+    def match_literal(self, s: str, sym: Symbol):
+        """ Match string against current automaton;
+        store it either as a fixedToken or as a litToken
+        """
+        s = self.tab.unescape(s[1:-1])
+        len_ = len(s)
+        state = self._first_state
+        a = None
+        i = 0
+        while i < len_:  # try to match s against existing DFA
+            a = self.find_action(state, ord(s[i]))
+            if a is None:
+                break
+            state = a.target.state
+            i += 1
+
+        # if s was not totally consumed or leads to a non-final state => make new DFA from it
+        if i != len_ or state.endOf is None:
+            state = self._first_state
+            i = 0
+            a = None
+            self.dirty_DFA = True
+
+        for i in range(i, len_):  # make new DFA for s[i..len-1]
+            to = self.new_state()
+            self.new_transition(state, to, Node.chr, ord(s[i]), Node.normalTrans)
+            state = to
+
+        matched_sym = state.endOf
+        if state.endOf is None:
+            state.endOf = sym
+        elif matched_sym.tokenKind == Symbol.fixedToken or a is not None and a.tc == Node.contextTrans:
+            # matched a token with a fixed definition or a token with an appendix that will be cut off
+            self.parser.sem_err("tokens {} and {} cannot be distinguished".format(sym.name, matched_sym.name))
+        else:  # matchedSym == classToken || classLitToken
+            matched_sym.tokenKind = Symbol.classLitToken
+            sym.tokenKind = Symbol.litToken
+
+    def states(self) -> Generator[State]:
+        state = self._first_state
+        while state is not None:
+            yield state
+            state = state.next
+
+    def split_actions(self, state: State, a: Action, b: Action):
+        seta = a.symbols(self.tab)
+        setb = b.symbols(self.tab)
+        if seta.equals(setb):
+            a.add_targets(b)
+            state.detach_action(b)
+        elif seta.includes(setb):
+            setc = seta.clone()
+            setc.subtract(setb)
+            b.add_targets(a)
+            a.shift_with(setc, self.tab)
+        elif setb.includes(seta):
+            setc = setb.clone()
+            setc.subtract(seta)
+            a.add_targets(b)
+            b.shift_with(setc, self.tab)
+        else:
+            setc = seta.clone()
+            setc.and_(setb)
+            seta.subtract(setc)
+            setb.subtract(setc)
+            a.shift_with(seta, self.tab)
+            b.shift_with(setb, self.tab)
+            c = Action(0, 0, Node.normalTrans)  # typ and sym are set in ShiftWith
+            c.add_targets(a)
+            c.add_targets(b)
+            c.shift_with(setc, self.tab)
+            state.add_action(c)
+
+    def overlap(self, a: Action, b: Action) -> bool:
+        if a.typ == Node.chr:
+            if b.typ == Node.chr:
+                return a.sym == b.sym
+            setb = self.tab.CharClass_set(b.sym)
+            return setb.get(a.sym)
+        seta = self.tab.CharClass_set(a.sym)
+        if b.typ == Node.chr:
+            return seta.get(b.sym)
+        setb = self.tab.CharClass_set(b.sym)
+        return seta.intersects(setb)
+
+    def make_unique(self, state: State):
+        changed = True
+        while changed:
+            changed = False
+            for i, a in enumerate(state.actions):
+                for b in state.actions[i + 1:]:
+                    if self.overlap(a, b):
+                        self.split_actions(a, b)
+                        changed = True
+
+    def melt_states(self, state: State):
+        for action in state.actions:
+            if action.target.next is None:
+                param: List[Any] = [None] * 2
+                ctx = self.get_target_states(action, param)
+                targets: Optional[Set[int]] = param[0]
+                end_of: Optional[Symbol] = param[1]
+
+                melt: Optional[Melted] = self.state_with_set(targets)
+                if melt is None:
+                    s = self.new_state()
+                    s.endOf = end_of
+                    s.ctx = ctx
+
+                    targ = action.target
+                    while targ is not None:
+                        s.melt_with(targ.state)
+                        targ = targ.next
+
+                    self.make_unique(s)
+                    melt = self.new_melted(targets, s)
+
+                action.target.next = None
+                action.target.state = melt.state
+
+    def find_ctx_states(self):
+        for state in self.states():
+            for a in state.actions:
+                if a.tc == Node.contextTrans:
+                    a.target.state.ctx = True
+
+    def make_deterministic(self):
+        last_sim_state = self._last_state.nr
+        max_states = 2 * last_sim_state  # heuristic for set size in Melted.set
+        self.find_ctx_states()
+
+        for state in self.states():
+            self.make_unique(state)
+
+        for state in self.states():
+            self.melt_states(state)
+
+        self.delete_redundant_states()
+        self.combine_shifts()
+
+    def print_states(self):
+        self.trace.write_line()
+        self.trace.write_line("---------- states ----------")
+
+        for state in self.states():
+            first = True
+            if state.endOf is None:
+                self.trace.write("               ")
+            else:
+                self.trace.write("E({})".format(state.endOf.name), 12)
+            self.trace.write("{}:".format(state.nr), 3)
+            if state.first_action is None:
+                self.trace.write_line()
+
+            for action in state.actions:
+                if first:
+                    first = False
+                    self.trace.write(" ")
+                else:
+                    self.trace.write("                   ")
+
+                if action.typ == Node.clas:
+                    self.trace.write(self.tab.classes[action.sym].name)
+                else:
+                    self.trace.write(self.ch(action.sym), 3)
+
+                targ = action.target
+                while targ is not None:
+                    self.trace.write(str(targ.state.nr), 3)
+                    targ = targ.next
+
+                if action.tc == Node.contextTrans:
+                    self.trace.write_line(" context")
+                else:
+                    self.trace.write_line()
+
+        self.trace.write_line()
+        self.trace.write_line("---------- character classes ----------")
+        self.tab.write_CharClasses()
+
+    # ------------------------ actions ------------------------------
+    def find_action(self, state: State, ch: int) -> Optional[Action]:
+        for a in state.actions:
+            if a.typ == Node.chr and ch == a.sym:
+                return a
+            if a.typ == Node.clas:
+                s = self.tab.CharClass_set(a.sym)
+                if s.get(ch):
+                    return a
+
+        return None
