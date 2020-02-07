@@ -78,7 +78,7 @@ class CharSet:
     def first(self) -> int:
         return self.ranges[0].from_ if self.ranges else -1
 
-    def or_(self, other):
+    def or_(self, other: 'CharSet'):
         assert isinstance(other, CharSet)
         for range_ in other.ranges:
             for i in range_:
