@@ -5,7 +5,7 @@ from typing import List, BinaryIO, TextIO, Optional, Set, Any, Generator
 from .tab import Node, Symbol, Tab
 from .charset import CharSet
 from .parser import Parser
-from .errors import Errors
+from .errors import Errors, FatalError
 from .trace import Trace
 
 
@@ -81,6 +81,12 @@ class Action:
                 c = tab.new_CharClass('#', s)
                 self.typ = Node.clas
                 self.sym = c.n
+
+    def targets_iterator(self) -> Generator[Target]:
+        target = self.target
+        while target is not None:
+            yield target
+            target = target.next
 
 
 class State:
@@ -455,10 +461,8 @@ class DFA:
                     s.endOf = end_of
                     s.ctx = ctx
 
-                    targ = action.target
-                    while targ is not None:
+                    for targ in action.targets_iterator():
                         s.melt_with(targ.state)
-                        targ = targ.next
 
                     self.make_unique(s)
                     melt = self.new_melted(targets, s)
@@ -512,10 +516,8 @@ class DFA:
                 else:
                     self.trace.write(self.ch(action.sym), 3)
 
-                targ = action.target
-                while targ is not None:
+                for targ in action.targets_iterator():
                     self.trace.write(str(targ.state.nr), 3)
-                    targ = targ.next
 
                 if action.tc == Node.contextTrans:
                     self.trace.write_line(" context")
@@ -537,3 +539,87 @@ class DFA:
                     return a
 
         return None
+
+    def get_target_states(self, a: Action, param: List[Any]) -> bool:
+        """ Compute the set of target states
+        """
+        ctx = False
+        targets: Set[int] = set()
+        end_of: Optional[Symbol] = None
+
+        for t in a.targets_iterator():
+            state_nr = t.state.nr
+            if state_nr < self.last_sim_state:
+                targets.add(state_nr)
+            else:
+                targets.update(self.melted_set(state_nr))
+
+            if t.state.endOf is not None:
+                if end_of is None or end_of == t.state.endOf:
+                    end_of = t.state.endOf
+                else:
+                    self.errors.sem_err("Tokens {} and {} "
+                                        "cannot be distinguished".format(end_of.name, t.state.endOf.name))
+            if t.state.ctx:
+                ctx = True
+
+        param[0] = targets
+        param[1] = end_of
+        return ctx
+
+    # ---------------------- melted states --------------------------
+
+    first_melted: Optional[Melted] = None  # head of melted state list
+
+    def melted_iterator(self) -> Generator[Melted]:
+        m = self.first_melted
+        while m is not None:
+            yield m
+            m = m.next
+
+    def new_melted(self, set_: Set[int], state: State) -> Melted:
+        m = Melted(set_, state)
+        m.next = self.first_melted
+        self.first_melted = m
+        return m
+
+    def melted_set(self, nr: int) -> Set[int]:
+        for m in self.melted_iterator():
+            if m.state.nr == nr:
+                return m.set_
+
+        raise FatalError("Compiler error in Melted.Set")
+
+    def state_with_set(self, s: Set[int]) -> Optional[Melted]:
+        for m in self.melted_iterator():
+            if s == m.set_:
+                return m
+
+        return None
+
+    # ------------------------- comments ----------------------------
+    first_comment: Optional[Comment] = None
+
+
+    def comment_str(self, p: Node) -> str:
+        s = ''
+        while p is not None:
+            if p.typ == Node.chr:
+                s += chr(p.val)
+            elif p.typ == Node.clas:
+                set_ = self.tab.CharClass_set(p.val)
+                if set_.elements() != 1:
+                    self.parser.sem_err("character set contains more than 1 character")
+                s += chr(set_.first())
+            else:
+                self.parser.sem_err("comment delimiters must be 1 or 2 characters long")
+                s = "?"
+
+        return s
+
+    def new_comment(self, from_:Node, to: Node, nested: bool):
+        c = Comment(self.comment_str(from_), self.comment_str(to), nested)
+        c.next = self.first_comment
+        self.first_comment = c
+
+    # --------------------- scanner generation ------------------------
