@@ -79,7 +79,7 @@ class Parser:
         else:
             self.syn_err(n)
 
-    def start_of(self, s) -> bool:
+    def start_of(self, s: int) -> bool:
         return self.set_[s][self.la.kind]
 
     def expect_weak(self, n: int, follow: int):
@@ -89,6 +89,21 @@ class Parser:
             self.syn_err(n)
             while not self.start_of(follow):
                 self.get()
+
+    def weak_separator(self, n: int, sy_fol: int, rep_fol: int) -> bool:
+        kind = self.la.kind
+        if kind == n:
+            self.get()
+            return True
+        elif self.start_of(rep_fol):
+            return False
+
+        self.syn_err(n)
+        while not (self.set_[sy_fol][kind] or self.set_[rep_fol][kind] or self.set_[0][kind]):
+            self.get()
+            kind = self.la.kind
+
+        return self.start_of(sy_fol)
 
     set_ = [
         [T_,T_,x_,T_, x_,T_,x_,x_, x_,x_,T_,T_, x_,x_,x_,T_, T_,T_,x_,x_, x_,x_,x_,x_, x_,x_,x_,x_, x_,x_,x_,x_, x_,x_,x_,x_, x_,x_,x_,x_, x_,x_,T_,x_, x_,x_],
