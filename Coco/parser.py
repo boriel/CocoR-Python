@@ -4,8 +4,10 @@
 from .errors import Errors
 from .scanner import Scanner, Token
 from .trace import Trace
-from .tab import Tab
+from .tab import Tab, Position
 from .dfa import DFA
+from .charset import CharSet
+from .parsergen import ParserGen
 
 
 T_: bool = True
@@ -37,6 +39,7 @@ class Parser:
 
     trace: Trace
     tab: Tab
+    pgen: ParserGen
     dfa: DFA
 
     genScanner: bool
@@ -104,6 +107,33 @@ class Parser:
             kind = self.la.kind
 
         return self.start_of(sy_fol)
+
+    def coco(self):
+        if self.start_of(1):
+            self.get()
+            beg = self.t.pos
+            while self.start_of(1):
+                self.get()
+
+            self.pgen.using_pos = Position(beg, self.la.pos, 0)
+
+        self.expect(6)
+        self.genScanner = True
+        self.tab.ignored = CharSet()
+        self.expect(1)
+
+        gram_name = self.t.val
+        beg = self.la.pos
+
+        while self.start_of(2):
+            self.get()
+
+        self.tab.semDeclPos = Position(beg, self.la.pos, 0)
+        if self.la.kind == 7:
+            self.get()
+            self.dfa.ignore_case = True
+
+
 
     set_ = [
         [T_,T_,x_,T_, x_,T_,x_,x_, x_,x_,T_,T_, x_,x_,x_,T_, T_,T_,x_,x_, x_,x_,x_,x_, x_,x_,x_,x_, x_,x_,x_,x_, x_,x_,x_,x_, x_,x_,x_,x_, x_,x_,T_,x_, x_,x_],
