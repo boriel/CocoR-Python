@@ -129,7 +129,7 @@ class CNode:
 
 
 class Tab:
-    semFeclPos: Position
+    semDeclPos: Position
     ignored: CharSet
     ddt: List[bool] = [False] * 10
     gramSy: Symbol
