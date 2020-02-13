@@ -137,8 +137,8 @@ class DFA:
 
     max_states: int
     last_state_nr: int      # highest state number
-    _first_state: State
-    _last_state: State      # last allocated state
+    _first_state: Optional[State]
+    _last_state: Optional[State]   # last allocated state
     last_sim_state: int     # last non melted state
     fram: BinaryIO          # scanner frame input     /* pdt */
     gen: TextIO             # generated scanner file  /* pdt */
@@ -149,6 +149,21 @@ class DFA:
     parser: Parser
     errors: Errors
     trace: Trace
+
+    def DFA(self, parser: Parser):
+        self.parser = parser
+        self.tab = parser.tab
+        self.errors = parser.errors
+        self.trace = parser.trace
+        self._first_state = None
+        self._last_state = None
+        self.last_state_nr = -1
+        self._first_state = self.new_state()
+        self.first_melted = None
+        self.first_comment = None
+        self.ignore_case = False
+        self.dirty_DFA = False
+        self.has_ctx_moves = False
 
     # ---------- Output primitives
     @staticmethod
@@ -599,7 +614,6 @@ class DFA:
 
     # ------------------------- comments ----------------------------
     first_comment: Optional[Comment] = None
-
 
     def comment_str(self, p: Node) -> str:
         s = ''
