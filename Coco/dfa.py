@@ -637,3 +637,80 @@ class DFA:
         self.first_comment = c
 
     # --------------------- scanner generation ------------------------
+    def print(self, s: str = ''):
+        self.gen.write(s.replace('\t', ' ' * 4))
+
+    def println(self, s: str = ''):
+        self.print(s + '\n')
+
+    def gen_com_body(self, com: Comment):
+        self.println("\t\t\twhile True:")
+        self.println('\t\t\t\tif {}:'.format(self.ch_cond(ord(com.stop[0]))))
+
+        if len(com.stop) == 1:
+            self.println('\t\t\t\t\tlevel -= 1')
+            self.println('\t\t\t\t\tif level == 0:')
+            self.println('\t\t\t\t\t\tself.old_eols = self.line - line0')
+            self.println('\t\t\t\t\t\tself.next_ch()')
+            self.println('\t\t\t\t\t\treturn True')
+            self.println('\t\t\t\t\tself.next_ch()')
+        else:
+            self.println('\t\t\t\t\tself.next_ch()')
+            self.println('\t\t\t\t\tif {}:'.format(self.ch_cond(ord(com.stop[1]))))
+            self.println('\t\t\t\t\t\tlevel -= 1')
+            self.println('\t\t\t\t\t\tif level == 0:')
+            self.println('\t\t\t\t\t\t\tself.old_eols = self.line - line0')
+            self.println('\t\t\t\t\t\t\tself.next_ch()')
+            self.println('\t\t\t\t\t\t\treturn True')
+            self.println('\t\t\t\t\t\tself.next_ch()')
+
+        if com.nested:
+            self.println('\t\t\t\telif {}:'.format(self.ch_cond(ord(com.start[0]))))
+            if len(com.start) == 1:
+                self.println('\t\t\t\t\tlevel += 1')
+                self.println('\t\t\t\t\tself.next_ch()')
+            else:
+                self.println('\t\t\t\t\tself.next_ch()')
+                self.println('\t\t\t\t\tif {}:'.format(self.ch_cond(ord(com.start[1]))))
+                self.println('\t\t\t\t\t\tlevel += 1')
+                self.println('\t\t\t\t\t\tself.next_ch()')
+
+        self.println('\t\t\t\telif self.ch == Buffer.EOF:')
+        self.println('\t\t\t\t\treturn False')
+        self.println('\t\t\t\telse:')
+        self.println('\t\t\t\t\tself.next_ch()')
+
+    def gen_comment(self, com: Comment, i: int):
+        self.println()
+        self.println('\tdef comment{}(self) -> bool:'.format(i))
+        self.println('\t\tlevel:int = 1')
+        self.println('\t\tpos0 = self.pos')
+        self.println('\t\tline0 = self.line')
+        self.println('\t\tcol0 = self.col')
+        self.println('\t\tchar_pos0 = self.char_pos')
+
+        if len(com.start) == 1:
+            self.println('\t\tself.next_ch()')
+            self.gen_com_body(com)
+        else:
+            self.println('\t\tself.next_ch()')
+            self.println('\t\tif {}:'.format(self.ch_cond(ord(com.start[1]))))
+            self.println('\t\t\tself.next_ch()')
+            self.gen_com_body(com)
+            self.println('\t\telse:')
+            self.println('\t\t\tself.set_pos(pos0)')
+            self.println('\t\t\tself.next_ch()')
+            self.println('\t\t\tself.line = line0')
+            self.println('\t\t\tself.col = col0')
+            self.println('\t\t\tself.char_pos = char_pos0')
+            self.println('\t\treturn False')
+
+        self.println()
+
+    def sym_name(self, sym: Symbol):
+        if sym.name[0].isalpha():  # real name value is stored in Tab.literals
+            for me_key, me_val in self.tab.literals.items():
+                if me_val == sym:
+                    return me_key
+
+        return sym.name
