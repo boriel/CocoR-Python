@@ -7,6 +7,7 @@ from .charset import CharSet
 from .parser import Parser
 from .errors import Errors, FatalError
 from .trace import Trace
+from .generator import Generator as Generator_
 
 
 class Target:
@@ -714,3 +715,74 @@ class DFA:
                     return me_key
 
         return sym.name
+
+    def gen_literals(self):
+        ts = [self.tab.terminals, self.tab.pragmas]
+        for iter_ in ts:
+            for sym in iter_:
+                if sym.tokenKind == Symbol.litToken:
+                    name = self.sym_name(sym)
+                    if self.ignore_case:
+                        name = name.lower()
+                    self.println('\t\tself.literals[{}] = {}'.format(name, sym.n))
+
+    def write_state(self, state: State):
+        endOf: Symbol = state.endOf
+        self.println('\t\t\t\tif state == {}:'.format(state.nr, 1))
+        if endOf is not None and state.first_action is not None:
+            self.println('\t\t\t\t\trec_end = pos')
+            self.println('\t\t\t\t\trec_kind = {}'.format(endOf.n))
+
+        ctx_end: bool = state.ctx
+        for action in state.actions:
+            if action == state.first_action:
+                self.print('\t\t\t\t\tif ')
+            else:
+                self.print('\t\t\t\t\telif ')
+
+            if action.typ == Node.chr:
+                self.print(self.ch_cond(action.sym))
+            else:
+                self.put_range(self.tab.CharClass_set(action.sym))
+
+            self.println(':')
+            if action.tc == Node.contextTrans:
+                self.println('\t\t\t\t\t\tapx += 1')
+                ctx_end = False
+            elif state.ctx:
+                self.println('\t\t\t\t\t\tapx = 0')
+
+            self.println('\t\t\t\t\t\tself.add_ch()')
+            self.println('\t\t\t\t\t\tstate = {}'.format(action.target.state.nr))
+
+        if state.first_action is None:
+            self.println('\t\t\t\t\t:')
+        else:
+            self.println('\t\t\t\t\telse:')
+
+        if ctx_end:  # final context state: cut appendix
+            self.println('\t\t\t\t\t\tself.set_scanner_behind_T()')
+
+        if endOf is None:
+            self.println('\t\t\t\t\t\tstate = 0')
+        else:
+            self.println('\t\t\t\t\t\tself.t.kind = {}'.format(endOf.n))
+            if endOf.tokenKind == Symbol.classLitToken:
+                self.println('\t\t\t\t\t\tself.t.val = self.tval')
+                self.println('\t\t\t\t\t\tself.check_literal()')
+                self.println('\t\t\t\t\t\treturn self.t')
+            else:
+                self.println('\t\t\t\t\t\tbreak')
+
+    def write_start_tab(self):
+        for action in self._first_state.actions:
+            target_state = action.target.state.nr
+            if action.typ == Node.chr:
+                self.println('\t\tself.start[{}] = {}'.format(action.sym, target_state))
+            else:
+                s: CharSet = self.tab.CharClass_set(action.sym)
+                for r in s.ranges:
+                    self.println('\t\tfor i in range({}, {}):'.format(r.from_, r.to + 1))
+                    self.println('\t\t\tself.start[i] = {}'.format(target_state))
+
+        self.println('\t\tself.start[Buffer.EOF] = -1')
