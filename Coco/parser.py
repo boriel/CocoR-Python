@@ -5,7 +5,7 @@ import sys
 from .errors import Errors
 from .scanner import Scanner, Token
 from .trace import Trace
-from .tab import Tab, Position, Node, Graph, Symbol
+from .tab import Tab, Position, Node, Graph, Symbol, SymInfo
 from .dfa import DFA
 from .charset import CharSet
 from .parsergen import ParserGen
@@ -270,7 +270,45 @@ class Parser:
         self.expect(18)
 
     def token_decl(self, typ: int):
-        pass
+        s = self.sym()
+        sym = self.tab.find_sym(s.name)
+        if sym is not None:
+            self.sem_err("'{}' name declared twice".format(s.name))
+        else:
+            sym = self.tab.new_sym(typ, s.name, self.t.line)
+            sym.tokenKind = Symbol.fixedToken
+
+        self.tokenString = ''
+        while not self.start_of(5):
+            self.syn_err(46)
+            self.get()
+
+        if self.la.kind == 17:
+            self.get()
+            g = self.token_expr()
+            self.expect(18)
+            if s.kind == self.str_:
+                self.sem_err("a literal must not be declared with a structure")
+            self.tab.finish(g)
+            if not self.tokenString or self.tokenString == self.noString:
+                self.dfa.convert_to_states(g.l, sym)
+            else:  # TokenExpr is a single string
+                if self.tab.literals.get(self.tokenString) is not None:
+                    self.sem_err("token string declared twice")
+                self.tab.literals[self.tokenString] = sym
+                self.dfa.match_literal(self.tokenString, sym)
+        elif self.start_of(6):
+            if s.kind == self.id:
+                self.genScanner = False
+            else:
+                self.dfa.match_literal(sym.name, sym)
+        else:
+            self.syn_err(47)
+
+        if self.la.kind == 42:
+            sym.semPos = self.sem_text()
+            if typ != Node.pr:
+                self.sem_err("semantic action not allowed here")
 
     def token_expr(self) -> Graph:
         g: Graph = self.token_term()
@@ -286,6 +324,9 @@ class Parser:
         return g
 
     def set(self) -> CharSet:
+        pass
+
+    def sym(self) -> SymInfo:
         pass
 
 
