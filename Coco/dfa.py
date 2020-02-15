@@ -20,12 +20,13 @@ class Target:
 
 
 class Comment:
-    next: 'Comment'
+    next: Optional['Comment']
 
     def __init__(self, start: str, stop: str, nested: bool):
         self.start = start
         self.stop = stop
         self.nested = nested
+        self.next = None
 
 
 class Action:
@@ -237,7 +238,7 @@ class DFA:
             self.find_used_states(a.target.state, used)
 
     def delete_redundant_states(self):
-        new_state = [None] * self.last_state_nr + 1
+        new_state: List[Optional[State]] = [None] * (self.last_state_nr + 1)
         used = set()
         self.find_used_states(self._first_state, used)
 
@@ -460,7 +461,7 @@ class DFA:
             for i, a in enumerate(state.actions):
                 for b in state.actions[i + 1:]:
                     if self.overlap(a, b):
-                        self.split_actions(a, b)
+                        self.split_actions(state, a, b)
                         changed = True
 
     def melt_states(self, state: State):
@@ -786,3 +787,84 @@ class DFA:
                     self.println('\t\t\tself.start[i] = {}'.format(target_state))
 
         self.println('\t\tself.start[Buffer.EOF] = -1')
+
+    def write_scanner(self):
+        g: Generator_ = Generator_(self.tab)
+        self.fram = g.open_file("Scanner.frame")
+        self.gen = g.open_gen("Scanner.java")
+        if self.dirty_DFA:
+            self.make_deterministic()
+
+        g.gen_copyright()
+        g.skip_frame_part('-->begin')
+
+        g.copy_frame_part('-->declarations')
+        self.println('\tmaxT: int = {}'.format(len(self.tab.terminals) - 1))
+        self.println('\tnoSym: int = {}'.format(self.tab.noSym.n))
+
+        if self.ignore_case:
+            self.print('\tvalCh: str  # Current input character (for token.val)')
+
+        g.copy_frame_part('-->initialization')
+        self.write_start_tab()
+        self.gen_literals()
+
+        g.copy_frame_part('-->casing')
+        if self.ignore_case:
+            self.println('\t\tif self.ch != Buffer.EOF')
+            self.println('\t\t\tself.valCh = chr(self.ch)')
+            self.println('\t\t\tself.ch = ord(self.valCh.lower())')
+
+        g.copy_frame_part('-->casing2')
+        if self.ignore_case:
+            self.println('\t\t\tself.tval += self.valCh')
+        else:
+            self.println('\t\t\tself.tval += chr(self.ch)')
+
+        g.copy_frame_part('-->comments')
+        com: Comment = self.first_comment
+        com_idx: int = 0
+        while com is not None:
+            self.gen_comment(com, com_idx)
+            com = com.next
+            com_idx += 1
+
+        g.copy_frame_part('-->casing3')
+        if self.ignore_case:
+            self.println('\t\tval = val.lower()')
+
+        g.copy_frame_part('-->scan1')
+        self.print('\t\t\t')
+        if self.tab.ignored.elements() > 0:
+            self.put_range(self.tab.ignored)
+        else:
+            self.print('False')
+        self.println(':')
+
+        g.copy_frame_part('-->scan2')
+        if self.first_comment is not None:
+            self.print('\t\tif ')
+            com = self.first_comment
+            com_idx = 0
+            while com is not None:
+                self.print(self.ch_cond(ord(com.start[0])))
+                self.print(' and  self.comment{}()'.format(com_idx))
+                if com.next is not None:
+                    self.print(' or ')
+
+                com = com.next
+                com_idx += 1
+
+            self.println(':')
+            self.println('\t\t\treturn self.next_token()')
+
+        if self.has_ctx_moves:
+            self.println()
+            self.println('\t\tapx: int = 0')  # pdt
+
+        g.copy_frame_part('-->scan3')
+        for state in self.states():
+            self.write_state(state)
+
+        g.copy_frame_part(None)
+        self.gen.close()
