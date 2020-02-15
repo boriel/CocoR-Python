@@ -14,7 +14,6 @@ class Position(NamedTuple):
     beg: int
     end: int
     col: int
-    line: int
 
 
 class SymInfo(NamedTuple):

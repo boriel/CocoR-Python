@@ -324,11 +324,134 @@ class Parser:
         return g
 
     def set(self) -> CharSet:
-        pass
+        s = self.sim_set()
+        while self.la.kind in (20, 21):
+            if self.la.kind == 20:
+                self.get()
+                s2 = self.sim_set()
+                s.or_(s2)
+            else:
+                self.get()
+                s2 = self.sim_set()
+                s.subtract(s2)
+        return s
+
+    def attr_decl(self, sym: Symbol):
+        if self.la.kind == 24:
+            self.get()
+            if self.la.kind in (25, 26):
+                if self.la.kind == 25:
+                    self.get()
+                else:
+                    self.get()
+                beg = self.la.pos
+                self.type_name()
+                sym.retType = self.scanner.buffer.get_string(beg, self.la.pos)
+                self.expect(1)
+                sym.retVar = self.t.val
+
+                if self.la.kind == 27:
+                    self.get()
+                elif self.la.kind == 28:
+                    self.get()
+                    beg = self.la.pos
+                    col = self.la.col
+                    while self.start_of(9):
+                        self.get()
+                    self.expect(27)
+                    if self.t.pos > beg:
+                        sym.attrPos = Position(beg, self.t.pos, col)
+                else:
+                    self.syn_err(48)
+            elif self.start_of(10):
+                beg = self.la.pos
+                col = self.la.col
+                if self.start_of(11):
+                    self.get()
+                    while self.start_of(9):
+                        self.get()
+
+                self.expect(27)
+                if self.t.pos > beg:
+                    sym.attrPos = Position(beg, self.t.pos, col)
+            else:
+                self.syn_err(49)
+        elif self.la.kind == 29:
+            self.get()
+            if self.la.kind in (25, 26):
+                if self.la.kind == 25:
+                    self.get()
+                else:
+                    self.get()
+
+                beg = self.la.pos
+                self.type_name()
+                sym.retType = self.scanner.buffer.get_string(beg, self.la.pos)
+                self.expect(1)
+                sym.retVar = self.t.val
+                if self.la.kind == 30:
+                    self.get()
+                elif self.la.kind == 28:
+                    self.get()
+                    beg = self.la.pos
+                    col = self.la.col
+                    while self.start_of(12):
+                        self.get()
+                    self.expect(30)
+                    if self.t.pos > beg:
+                        sym.attrPos = Position(beg, self.t.pos, col)
+                else:
+                    self.syn_err(50)
+            elif self.start_of(10):
+                beg = self.la.pos
+                col = self.la.col
+                if self.start_of(13):
+                    self.get()
+                    while self.start_of(12):
+                        self.get()
+                self.expect(30)
+                if self.t.pos > beg:
+                    sym.attrPos = Position(beg, self.t.pos, col)
+            else:
+                self.syn_err(51)
+        else:
+            self.syn_err(52)
+
+    def sem_text(self) -> Position:
+        self.expect(42)
+        beg = self.la.pos
+        col = self.la.col
+
+        while self.start_of(14):
+            if self.start_of(15):
+                self.get()
+            elif self.la.kind == 4:
+                self.get()
+                self.sem_err("bad string in semantic action")
+            else:
+                self.get()
+                self.sem_err("missing end of previous semantic action")
+        self.expect(43)
+        pos = Position(beg, self.t.pos, col)
+        return pos
+
+    def expression(self) -> Graph:
+        g = self.term()
+        first = True
+        while self.weak_separator(33, 16, 17):
+            g2 = self.term()
+            if first:
+                self.tab.make_first_alt(g)
+                first = False
+            self.tab.make_alternative(g, g2)
+
+        return g
 
     def sym(self) -> SymInfo:
         pass
 
+    def sim_set(self) -> CharSet:
+        pass
 
     set_ = [
         [T_,T_,x_,T_, x_,T_,x_,x_, x_,x_,T_,T_, x_,x_,x_,T_, T_,T_,x_,x_, x_,x_,x_,x_, x_,x_,x_,x_, x_,x_,x_,x_, x_,x_,x_,x_, x_,x_,x_,x_, x_,x_,T_,x_, x_,x_],
