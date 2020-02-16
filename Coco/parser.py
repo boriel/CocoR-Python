@@ -444,14 +444,65 @@ class Parser:
                 self.tab.make_first_alt(g)
                 first = False
             self.tab.make_alternative(g, g2)
-
         return g
+
+    def sim_set(self) -> CharSet:
+        s = CharSet()
+        if self.la.kind == 1:
+            self.get()
+            c = self.tab.find_CharClass(self.t.val)
+            if c is None:
+                self.sem_err("undefined name '{}'".format(self.t.val))
+            else:
+                s.or_(c.set_)
+
+        elif self.la.kind == 3:
+            self.get()
+            name = self.t.val
+            name = self.tab.unescape(name[1:-1])
+            for c in name:
+                if self.dfa.ignore_case:
+                    s.set(ord(c.lower()))
+                else:
+                    s.set(ord(c))
+
+        elif self.la.kind == 3:
+            n1 = self.char()
+            s.set(n1)
+            if self.la.kind == 22:
+                self.get()
+                n2 = self.char()
+                for i in range(n1, n2 + 1):
+                    s.set(i)
+
+        elif self.la.kind == 23:
+            self.get()
+            s = CharSet()
+            s.fill()
+
+        else:
+            self.syn_err(53)
+
+        return s
+
+    def char(self) -> int:
+        self.expect(5)
+        name = self.t.val
+        n = 0
+        name = self.tab.unescape(name[1:-1])
+        if len(name) == 1:
+            n = name[0]
+        else:
+            self.sem_err("unacceptable character value")
+
+        if self.dfa.ignore_case and 'A' <= chr(n) <= 'Z':
+            n += 32  # to lowercase
+
+        return n
 
     def sym(self) -> SymInfo:
         pass
 
-    def sim_set(self) -> CharSet:
-        pass
 
     set_ = [
         [T_,T_,x_,T_, x_,T_,x_,x_, x_,x_,T_,T_, x_,x_,x_,T_, T_,T_,x_,x_, x_,x_,x_,x_, x_,x_,x_,x_, x_,x_,x_,x_, x_,x_,x_,x_, x_,x_,x_,x_, x_,x_,T_,x_, x_,x_],
