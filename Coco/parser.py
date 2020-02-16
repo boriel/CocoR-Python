@@ -588,6 +588,93 @@ class Parser:
         self.condition()
         return Position(beg, self.t.pos, col)
 
+    def factor(self) -> Graph:
+        weak: bool = False
+
+        if self.la.kind in (1, 3, 5, 34):
+            if self.la.kind == 34:
+                self.get()
+                weak = True
+            s = self.sym()
+            sym = self.tab.find_sym(s.name)
+            if sym is None and s.kind == self.str_:
+                sym = self.tab.literals.get(s.name)
+            undef: bool = sym is None
+            if undef:
+                if s.kind == self.id:
+                    sym = self.tab.new_sym(Node.t, s.name, 0)  # forward nt
+                elif self.genScanner:
+                    sym = self.tab.new_sym(Node.t, s.name, self.t.line)
+                    self.dfa.match_literal(sym.name, sym)
+                else:  # undefined string in production
+                    self.sem_err("undefined string '{}' in production".format(s.name))
+                    sym = self.tab.eofSy  # dummy
+
+            typ = sym.typ
+            if typ != Node.t and typ != Node.nt:
+                self.sem_err("this symbol kind is not allowed in production")
+
+            if weak:
+                if typ == Node.t:
+                    typ = Node.wt
+                else:
+                    self.sem_err("only terminals may be weak")
+
+            p: Node = self.tab.new_node(typ, sym, self.t.line)
+            g = Graph(p)
+
+            if self.la.kind in (24, 29):
+                self.attribs(p)
+                if s.kind != self.id:
+                    self.sem_err("a literal must not have attributes")
+
+            if undef:
+                sym.attrPos = p.pos  # dummy
+                sym.retVar = p.retVar  # AH - dummy
+            elif (p.pos is None) != (sym.attrPos is None) or (p.retVar is None) != (sym.retVar is None):
+                self.sem_err("attribute mismatch between declaration and use of this symbol")
+
+        elif self.la.kind == 35:
+            self.get()
+            g = self.expression()
+            self.expect(36)
+
+        elif self.la.kind == 31:
+            self.get()
+            g = self.expression()
+            self.expect(32)
+            self.tab.make_option(g)
+
+        elif self.la.kind == 37:
+            self.get()
+            g = self.expression()
+            self.expect(38)
+            self.tab.make_iteration(g)
+
+        elif self.la.kind == 42:
+            pos = self.sem_text()
+            p = self.tab.new_node(Node.sem, None, 0)
+            p.pos = pos
+            g = Graph(p)
+
+        elif self.la.kind == 23:
+            self.get()
+            p = self.tab.new_node(Node.any, None, self.t.line)  # p.set is set in tab.SetupAnys
+            g = Graph(p)
+
+        elif self.la.kind == 39:
+            self.get()
+            p = self.tab.new_node(Node.sync, None, 0)
+            g = Graph(p)
+
+        else:
+            self.syn_err(56)
+
+        if g is None:  # invalid start of Factor
+            g = Graph(self.tab.new_node(Node.eps, None, 0))
+
+        return g
+
 
     set_ = [
         [T_,T_,x_,T_, x_,T_,x_,x_, x_,x_,T_,T_, x_,x_,x_,T_, T_,T_,x_,x_, x_,x_,x_,x_, x_,x_,x_,x_, x_,x_,x_,x_, x_,x_,x_,x_, x_,x_,x_,x_, x_,x_,T_,x_, x_,x_],
