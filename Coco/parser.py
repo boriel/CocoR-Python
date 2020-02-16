@@ -501,8 +501,32 @@ class Parser:
         return n
 
     def sym(self) -> SymInfo:
-        pass
+        s = SymInfo()
+        s.name = "???"
+        s.kind = self.id
 
+        if self.la.kind == 1:
+            self.get()
+            s.kind = self.id
+            s.name = self.t.val
+
+        elif self.la.kind in (3, 5):
+            if self.la.kind == 3:
+                self.get()
+                s.name = self.t.val
+            else:
+                self.get()
+                s.name = '"{}"'.format(self.t.val[1:-1])
+
+            s.kind = str
+            if self.dfa.ignore_case:
+                s.name = s.name.lower()
+
+            if ' ' in s.name:
+                self.sem_err("literal tokens must not contain blanks")
+        else:
+            self.syn_err(54)
+        return s
 
     set_ = [
         [T_,T_,x_,T_, x_,T_,x_,x_, x_,x_,T_,T_, x_,x_,x_,T_, T_,T_,x_,x_, x_,x_,x_,x_, x_,x_,x_,x_, x_,x_,x_,x_, x_,x_,x_,x_, x_,x_,x_,x_, x_,x_,T_,x_, x_,x_],
