@@ -590,6 +590,7 @@ class Parser:
 
     def factor(self) -> Graph:
         weak: bool = False
+        g: Optional[Graph] = None
 
         if self.la.kind in (1, 3, 5, 34):
             if self.la.kind == 34:
@@ -787,6 +788,15 @@ class Parser:
                 self.syn_err(60)
         else:
             self.syn_err(61)
+
+    def condition(self):
+        while self.start_of(29):
+            if self.la.kind == 35:
+                self.get()
+                self.condition()
+            else:
+                self.get()
+        self.expect(36)
 
 
     set_ = [
