@@ -7,6 +7,8 @@ from .charset import CharSet
 from .parser import Parser
 from .errors import Errors
 from .trace import Trace
+from .dfa import State
+
 from . import constants
 
 
@@ -16,9 +18,13 @@ class Position(NamedTuple):
     col: int
 
 
-class SymInfo(NamedTuple):
+class SymInfo:
     name: str
     kind: int
+
+    def __init__(self, name="???", kind=-1):
+        self.name = name
+        self.kind = kind
 
 
 class Symbol:
