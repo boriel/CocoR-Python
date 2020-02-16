@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import sys
+from typing import Optional
 
 from .errors import Errors
 from .scanner import Scanner, Token
@@ -548,6 +549,44 @@ class Parser:
 
                 self.expect(27)
 
+    def term(self) -> Graph:
+        rslv: Optional[Node] = None
+        g: Optional[Graph] = None
+
+        if self.start_of(18):
+            if self.la.kind == 40:
+                rslv = self.tab.new_node(Node.rslv, None, self.la.line)
+                rslv.pos = self.resolver()
+                g = Graph(rslv)
+
+            g2: Graph = self.factor()
+            if rslv is not None:
+                self.tab.make_sequence(g, g2)
+            else:
+                g = g2
+
+            while self.start_of(19):
+                g2 = self.factor()
+                self.tab.make_sequence(g, g2)
+        elif self.start_of(20):
+            g = Graph(self.tab.new_node(Node.eps, None, 0))
+        else:
+            self.syn_err(55)
+
+        if g is None:  # invalid start of Term
+            g = Graph(self.tab.new_node(Node.eps, None, 0))
+
+        return g
+
+    def resolver(self) -> Position:
+        self.expect(40)
+        self.expect(35)
+
+        beg = self.la.pos
+        col = self.la.col
+
+        self.condition()
+        return Position(beg, self.t.pos, col)
 
 
     set_ = [
