@@ -743,7 +743,7 @@ class Parser:
                     if self.start_of(26):
                         self.get()
                     elif self.la.kind in (31, 35):
-                        self.backeted()
+                        self.bracketed()
                     else:
                         self.get()
                         self.sem_err("bad string in attributes")
@@ -798,6 +798,98 @@ class Parser:
                 self.get()
         self.expect(36)
 
+    def token_term(self) -> Graph:
+        g = self.token_factor()
+        while self.start_of(7):
+            g2 = self.token_factor()
+            self.tab.make_sequence(g, g2)
+
+        if self.la.kind == 41:
+            self.get()
+            self.expect(35)
+            g2 = self.token_expr()
+            self.tab.set_context_trans(g2.l)
+            self.dfa.has_ctx_moves = True
+            self.tab.make_sequence(g, g2)
+            self.expect(36)
+
+        return g
+
+    def token_factor(self) -> Graph:
+        g: Optional[Graph] = None
+
+        if self.la.kind in (1, 3, 5):
+            s = self.sym()
+            if s.kind == self.id:
+                c = self.tab.find_CharClass(s.name)
+                if c is None:
+                    self.sem_err("undefined name '{}'".format(s.name))
+                    c = self.tab.new_CharClass(s.name, CharSet())
+                p = self.tab.new_node(Node.clas, None, 0)
+                p.val = c.n
+                g = Graph()
+                self.tokenString = self.noString
+            else:  # str
+                g = self.tab.str_to_graph(s.name)
+                if self.tokenString is None:
+                    self.tokenString = s.name
+                else:
+                    self.tokenString = self.noString
+        elif self.la.kind == 35:
+            self.get()
+            g = self.token_expr()
+            self.expect(36)
+
+        elif self.la.kind == 31:
+            self.get()
+            g = self.token_expr()
+            self.expect(32)
+            self.tab.make_option(g)
+            self.tokenString = self.noString
+
+        elif self.la.kind == 37:
+            self.get()
+            g = self.token_expr()
+            self.expect(38)
+            self.tab.make_iteration(g)
+            self.tokenString = self.noString
+
+        else:
+            self.syn_err(62)
+
+        if g is None:  # invalid start of TokenFactor
+            g = Graph(self.tab.new_node(Node.eps, None, 0))
+
+        return g
+
+    def bracketed(self):
+        if self.la.kind == 35:
+            self.get()
+            while self.start_of(29):
+                if self.la.kind in (31, 35):
+                    self.bracketed()
+                else:
+                    self.get()
+            self.expect(36)
+
+        elif self.la.kind == 31:
+            self.get()
+            while self.start_of(30):
+                if self.la.kind in (31, 35):
+                    self.bracketed()
+                else:
+                    self.get()
+            self.expect(32)
+
+        else:
+            self.syn_err(63)
+
+    def parse(self):
+        self.la = Token()
+        self.la.val = ""
+        self.get()
+        self.coco()
+        self.expect(0)
 
     set_ = [
         [T_,T_,x_,T_, x_,T_,x_,x_, x_,x_,T_,T_, x_,x_,x_,T_, T_,T_,x_,x_, x_,x_,x_,x_, x_,x_,x_,x_, x_,x_,x_,x_, x_,x_,x_,x_, x_,x_,x_,x_, x_,x_,T_,x_, x_,x_],
