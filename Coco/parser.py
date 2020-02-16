@@ -675,6 +675,119 @@ class Parser:
 
         return g
 
+    def attribs(self, n: Node):
+        if self.la.kind == 24:
+            self.get()
+            if self.la.kind in (25, 26):
+                self.get()
+                beg = self.la.pos
+                while self.start_of(21):
+                    if self.start_of(22):
+                        self.get()
+                    elif self.la.kind in (31, 35):
+                        self.bracketed()
+                    else:
+                        self.get()
+                        self.sem_err("bad string in attributes")
+
+                n.retVar = self.scanner.buffer.get_string(beg, self.la.pos)
+                if self.la.kind == 27:
+                    self.get()
+                elif self.la.kind == 28:
+                    self.get()
+                    beg = self.la.pos
+                    col = self.la.col
+                    while self.start_of(9):
+                        if self.start_of(23):
+                            self.get()
+                        else:
+                            self.get()
+                            self.sem_err("bad string in attributes")
+
+                    self.expect(27)
+                    if self.t.pos > beg:
+                        n.pos = Position(beg, self.t.pos, col)
+                else:
+                    self.syn_err(57)
+            elif self.start_of(10):
+                beg = self.la.pos
+                col = self.la.col
+                if self.start_of(11):
+                    if self.start_of(24):
+                        self.get()
+                    else:
+                        self.get()
+                        self.sem_err("bad string in attributes")
+
+                    while self.start_of(9):
+                        if self.start_of(23):
+                            self.get()
+                        else:
+                            self.get()
+                            self.sem_err("bad string in attributes")
+
+                self.expect(27)
+                if self.t.pos > beg:
+                    n.pos = Position(beg, self.t.pos, col)
+
+            else:
+                self.syn_err(58)
+
+        elif self.la.kind == 29:
+            self.get()
+            if self.la.kind in (25, 26):
+                self.get()
+                beg = self.la.pos
+                while self.start_of(25):
+                    if self.start_of(26):
+                        self.get()
+                    elif self.la.kind in (31, 35):
+                        self.backeted()
+                    else:
+                        self.get()
+                        self.sem_err("bad string in attributes")
+
+                n.retVar = self.scanner.buffer.get_string(beg, self.la.pos)
+                if self.la.kind == 30:
+                    self.get()
+                elif self.la.kind == 28:
+                    self.get()
+                    beg = self.la.pos
+                    col = self.la.col
+                    while self.start_of(12):
+                        if self.start_of(27):
+                            self.get()
+                        else:
+                            self.get()
+                            self.sem_err("bad string in attributes")
+                    self.expect(30)
+                    if self.t.pos > beg:
+                        n.pos = Position(beg, self.t.pos, col)
+                else:
+                    self.syn_err(59)
+            elif self.start_of(10):
+                beg = self.la.pos
+                col = self.la.col
+                if self.start_of(13):
+                    if self.start_of(28):
+                        self.get()
+                    else:
+                        self.get()
+                        self.sem_err("bad string in attributes")
+                    while self.start_of(12):
+                        if self.start_of(27):
+                            self.get()
+                        else:
+                            self.get()
+                            self.sem_err("bad string in attributes")
+                self.expect(30)
+                if self.t.pos > beg:
+                    n.pos = Position(beg, self.t.pos, col)
+            else:
+                self.syn_err(60)
+        else:
+            self.syn_err(61)
+
 
     set_ = [
         [T_,T_,x_,T_, x_,T_,x_,x_, x_,x_,T_,T_, x_,x_,x_,T_, T_,T_,x_,x_, x_,x_,x_,x_, x_,x_,x_,x_, x_,x_,x_,x_, x_,x_,x_,x_, x_,x_,x_,x_, x_,x_,T_,x_, x_,x_],
