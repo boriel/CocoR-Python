@@ -528,6 +528,28 @@ class Parser:
             self.syn_err(54)
         return s
 
+    def type_name(self):
+        self.expect(1)
+
+        while self.la.kind in (18, 24, 31):
+            if self.la.kind == 18:
+                self.get()
+                self.expect(1)
+            elif self.la.kind == 31:
+                self.get()
+                self.expect(32)
+            else:
+                self.get()
+                self.type_name()
+
+                while self.la.kind == 28:
+                    self.get()
+                    self.type_name()
+
+                self.expect(27)
+
+
+
     set_ = [
         [T_,T_,x_,T_, x_,T_,x_,x_, x_,x_,T_,T_, x_,x_,x_,T_, T_,T_,x_,x_, x_,x_,x_,x_, x_,x_,x_,x_, x_,x_,x_,x_, x_,x_,x_,x_, x_,x_,x_,x_, x_,x_,T_,x_, x_,x_],
         [x_,T_,T_,T_, T_,T_,x_,T_, T_,T_,T_,T_, T_,T_,T_,T_, T_,T_,T_,T_, T_,T_,T_,T_, T_,T_,T_,T_, T_,T_,T_,T_, T_,T_,T_,T_, T_,T_,T_,T_, T_,T_,T_,T_, T_,x_],
